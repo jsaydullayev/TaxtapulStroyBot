@@ -1,4 +1,6 @@
 ﻿using Newtonsoft.Json;
+using System.Text.Json;
+using System.Xml.Linq;
 using TaxtapulStroyBot.Entities;
 
 namespace TaxtapulStroyBot.Services;
@@ -17,6 +19,16 @@ public class ProductService
     {
         Products.Add(product);
         WriteToFile();
+    }
+
+    public async void RemoveProduct(string productCode)
+    {
+        var product = Products.FirstOrDefault(u => u.code == productCode);
+        if(product != null)
+        {
+            Products.Remove(product);
+            WriteToFile();
+        }
     }
 
 

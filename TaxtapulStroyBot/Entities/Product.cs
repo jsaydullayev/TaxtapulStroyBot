@@ -5,5 +5,8 @@ public class Product
     public string code { get; set; }
     public string Name { get; set; }
     public string Price { get; set; }
+    public string? Thickness { get; set; }
+    public string? Length { get; set; }
+    public string? PackLength { get; set; }
     public string Description { get; set; }
 }
