@@ -1,4 +1,5 @@
-﻿using System.Reflection.Metadata;
+﻿using Microsoft.EntityFrameworkCore;
+using System.Reflection.Metadata;
 using TaxtapulStroyBot.Entities;
 using TaxtapulStroyBot.Services;
 using Telegram.Bot;
@@ -10,11 +11,15 @@ using Telegram.Bot.Types.ReplyMarkups;
 var botClient = new TelegramBotClient("8128993205:AAFJcSCnLA7yoUxH06WVbRRYbyI_QkH1olc");
 ProductService productService = new ProductService();
 Dictionary<long, Product> tempProducts = new();
+Dictionary<long, object> CodeProducts = new();
+Console.WriteLine("Bot ishga tushdi...");
+AppDbContext appDbContext = new AppDbContext();
+appDbContext.Database.Migrate();
+
 
 botClient.StartReceiving(HandleUpdateAsync, HandleErrorAsync);
-
-Console.WriteLine("Bot ishga tushdi...");
 await Task.Delay(-1); // Bot doimiy ishlashi uchun 
+
 
 async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
 {
@@ -38,34 +43,29 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         {
             await StartProductAdding(botClient, chatId);
         }
-        else if (tempProducts.ContainsKey(chatId) && tempProducts[chatId].code == "DELETE")
-        {
-            await ConfirmDeleteProduct(botClient, chatId, message.Text);
-        }
         else if (tempProducts.ContainsKey(chatId))
         {
             await ContinueProductAdding(botClient, chatId, message.Text);
         }
-        else if (message.Text == "🗑 Tovar o'chirish")
-        {
-            await DeleteProduct(botClient, chatId);
-        }
         else
         {
-            var product = productService.Products.Find(p => p.code == message.Text);
+            string userCode = message.Text;
+
+            var product = appDbContext.Products.FirstOrDefault(p => p.code == userCode);
+
             if (product != null)
             {
                 string info = $"Код: {product.code}\n" +
                               $"Малумотлари: {product.Description}\n" +
-                              $"Эни калинлиги: {product.Thickness}\n"+
-                              $"Узунлиги: {product.Length}\n"+
-                              $"Почка мт: {product.PackLength}\n"+
+                              $"Эни калинлиги: {product.Thickness}\n" +
+                              $"Узунлиги: {product.Length}\n" +
+                              $"Почка мт: {product.PackLength}\n" +
                               $"Нархи: {product.Price}\n";
-                await botClient.SendTextMessageAsync(chatId, info);
+                await botClient.SendTextMessageAsync(message.Chat.Id, info);
             }
             else
             {
-                await botClient.SendTextMessageAsync(chatId, "Mahsulot topilmadi.");
+                await botClient.SendTextMessageAsync(message.Chat.Id, "❌ Bunday kod topilmadi. Iltimos, to‘g‘ri kod kiriting.");
             }
         }
     }
@@ -122,10 +122,6 @@ IReplyMarkup AdminMenu()
             {
                 "📦 Tovarlar","➕ Tovar qo'shish"
             },
-        new KeyboardButton[]
-        {
-            "🗑 Tovar o'chirish"
-        }
         })
     {
         ResizeKeyboard = true
@@ -141,9 +137,9 @@ async Task ShowProducts(ITelegramBotClient botClient, long chatId)
     }
 
     string response = "📦 **Mavjud mahsulotlar:**\n";
-    foreach (var product in productService.Products)
+    foreach (var product in appDbContext.Products)
     {
-        response += $"🔹 **{product.Name}** | 🏷 Kod: {product.code} | 💰 {product.Price} so'm\n";
+        response += $"🔹 **{product.Name}** | 🏷 Kod: {product.code} | 💰 {product.Price} so'm\nMa'lumot: {product.Description}";
     }
 
     await botClient.SendTextMessageAsync(chatId, response);
@@ -169,15 +165,20 @@ async Task ContinueProductAdding(ITelegramBotClient botClient, long chatId, stri
         product.Name = text;
         await botClient.SendTextMessageAsync(chatId, "📏 Qalinligini kiriting:");
     }
+    else if (string.IsNullOrEmpty(product.Thickness))
+    {
+        product.Thickness = text;
+        await botClient.SendTextMessageAsync(chatId, "📏 Uzunligini kiriting:");
+    }
     else if (string.IsNullOrEmpty(product.Length))
     {
         product.Length = text;
-        await botClient.SendTextMessageAsync(chatId, "📏 Uzunligini kiriting:");
+        await botClient.SendTextMessageAsync(chatId, "📦 Pachkadagi uzunligini kiriting:");
     }
     else if (string.IsNullOrEmpty(product.PackLength))
     {
         product.PackLength = text;
-        await botClient.SendTextMessageAsync(chatId, "📦 Pachkadagi uzunligini kiriting:");
+        await botClient.SendTextMessageAsync(chatId, "Mahsulot narxini yozing:");
     }
     else if (string.IsNullOrEmpty(product.Price))
     {
@@ -187,33 +188,14 @@ async Task ContinueProductAdding(ITelegramBotClient botClient, long chatId, stri
     else
     {
         product.Description = text;
-        productService.AddProduct(product);
+        appDbContext.Products.Add(product);
+        appDbContext.SaveChanges();
         tempProducts.Remove(chatId);
 
         await botClient.SendTextMessageAsync(chatId, "✅ Mahsulot muvaffaqiyatli qo'shildi!", replyMarkup: AdminMenu());
     }
 }
 
-async Task DeleteProduct(ITelegramBotClient botClient, long chatId)
-{
-    await botClient.SendTextMessageAsync(chatId, "🗑 O'chirish uchun mahsulot kodini kiriting:");
-    tempProducts[chatId] = new Product { code = "DELETE" };
-}
-
-async Task ConfirmDeleteProduct(ITelegramBotClient botClient, long chatId, string productCode)
-{
-    var product = productService.Products.Find(p => p.code == productCode);
-    if (product != null)
-    {
-        productService.Products.Remove(product);
-        await botClient.SendTextMessageAsync(chatId, $"✅ {product.Name} o‘chirildi.", replyMarkup: AdminMenu());
-    }
-    else
-    {
-        await botClient.SendTextMessageAsync(chatId, "❌ Mahsulot topilmadi!");
-    }
-    productService.RemoveProduct(productCode);
-}
 
 
 
