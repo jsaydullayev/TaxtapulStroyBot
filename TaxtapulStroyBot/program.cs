@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using System.Reflection.Metadata;
 using TaxtapulStroyBot.Entities;
 using TaxtapulStroyBot.Services;
 using Telegram.Bot;
@@ -7,13 +6,27 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 
+using (var context = new AppDbContext())
+{
+    if (context.Database.CanConnect())
+    {
+        Console.WriteLine("✅ Database bilan ulanish o‘rnatildi!");
+    }
+    else
+    {
+        Console.WriteLine("❌ Database bilan ulanishda xatolik bor!");
+    }
+}
+
 
 var botClient = new TelegramBotClient("8128993205:AAFJcSCnLA7yoUxH06WVbRRYbyI_QkH1olc");
 ProductService productService = new ProductService();
 Dictionary<long, Product> tempProducts = new();
-Dictionary<long, object> CodeProducts = new();
+Dictionary<long, Product> updatingProducts = new Dictionary<long, Product>();
+Dictionary<long, string> updatingStage = new();
+
 Console.WriteLine("Bot ishga tushdi...");
-AppDbContext appDbContext = new AppDbContext();
+var appDbContext = new AppDbContext();
 appDbContext.Database.Migrate();
 
 
@@ -26,8 +39,9 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
     if (update.Message is { } message)
     {
         long chatId = message.Chat.Id;
+        string userText = message.Text;
 
-        if (message.Text == "/admin")
+        if (userText == "/admin")
         {
             await RequestPhoneNumber(botClient, chatId, message.Chat.Type);
         }
@@ -35,17 +49,25 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         {
             await CheckAdminAccess(botClient, chatId, contact.PhoneNumber);
         }
-        else if (message.Text == "📦 Tovarlar")
+        else if (userText == "📦 Tovarlar")
         {
             await ShowProducts(botClient, chatId);
         }
-        else if (message.Text == "➕ Tovar qo'shish")
+        else if (userText == "➕ Tovar qo'shish")
         {
             await StartProductAdding(botClient, chatId);
         }
+        else if (userText == "✏️ Tovar yangilash")
+        {
+            await StartProductUpdating(botClient, chatId);
+        }
         else if (tempProducts.ContainsKey(chatId))
         {
-            await ContinueProductAdding(botClient, chatId, message.Text);
+            await ContinueProductAdding(botClient, chatId, userText);
+        }
+        else if (updatingProducts.ContainsKey(chatId))
+        {
+            await ContinueProductUpdating(botClient, chatId, userText);
         }
         else
         {
@@ -107,7 +129,7 @@ async Task CheckAdminAccess(ITelegramBotClient botClient, long chatId, string us
         await botClient.SendTextMessageAsync(chatId, text: "\"✅ Siz admin sifatida tizimga kirdingiz!\"",
             replyMarkup: AdminMenu());
     }
-    else 
+    else
     {
         await botClient.SendTextMessageAsync(chatId, text: "❌ Kechirasiz, siz admin emassiz.");
     }
@@ -130,7 +152,7 @@ IReplyMarkup AdminMenu()
 
 async Task ShowProducts(ITelegramBotClient botClient, long chatId)
 {
-    if (productService.Products.Count == 0)
+    if (appDbContext.Products is null)
     {
         await botClient.SendTextMessageAsync(chatId, "📭 Mahsulotlar hali qo'shilmagan.");
         return;
@@ -194,6 +216,73 @@ async Task ContinueProductAdding(ITelegramBotClient botClient, long chatId, stri
 
         await botClient.SendTextMessageAsync(chatId, "✅ Mahsulot muvaffaqiyatli qo'shildi!", replyMarkup: AdminMenu());
     }
+}
+
+async Task StartProductUpdating(ITelegramBotClient botClient, long chatId)
+{
+    await botClient.SendTextMessageAsync(chatId, "📝 Yangilamoqchi bo'lgan mahsulot kodini kiriting:");
+    updatingProducts[chatId] = new Product();
+}
+
+async Task ContinueProductUpdating(ITelegramBotClient botClient, long chatId, string text)
+{
+    if (updatingStage[chatId] == "code")
+    {
+        var product = appDbContext.Products.FirstOrDefault(p => p.code == text);
+        if (product == null)
+        {
+            await botClient.SendTextMessageAsync(chatId, "❌ Bunday kodli mahsulot topilmadi. Iltimos, to‘g‘ri kod kiriting.");
+            return;
+        }
+        updatingProducts[chatId] = product;
+        updatingStage[chatId] = "name";
+        await botClient.SendTextMessageAsync(chatId, $"📛 Yangi nomini kiriting (hozirgi: {product.Name}):");
+    }
+    else if (updatingStage[chatId] == "name")
+    {
+        updatingProducts[chatId].Name = text;
+        updatingStage[chatId] = "price";
+        await botClient.SendTextMessageAsync(chatId, "💰 Yangi narxni kiriting:");
+    }
+    else if (updatingStage[chatId] == "price")
+    {
+            updatingProducts[chatId].Price = text;
+            updatingStage[chatId] = "thickness";
+            await botClient.SendTextMessageAsync(chatId, "📏 Yangi qalinlikni kiriting:");
+    }
+    else if (updatingStage[chatId] == "thickness")
+    {
+        updatingProducts[chatId].Thickness = text;
+        updatingStage[chatId] = "length";
+        await botClient.SendTextMessageAsync(chatId, "📏 Yangi uzunlikni kiriting:");
+    }
+    else if (updatingStage[chatId] == "length")
+    {
+        updatingProducts[chatId].Length = text;
+        updatingStage[chatId] = "packlength";
+        await botClient.SendTextMessageAsync(chatId, "📦 Pachkadagi uzunlikni kiriting:");
+    }
+    else if (updatingStage[chatId] == "packlength")
+    {
+        updatingProducts[chatId].PackLength = text;
+        updatingStage[chatId] = "description";
+        await botClient.SendTextMessageAsync(chatId, "📜 Yangi ma'lumotni kiriting:");
+    }
+    else if (updatingStage[chatId] == "description")
+    {
+        updatingProducts[chatId].Description = text;
+        await CompleteProductUpdating(botClient, chatId);
+    }
+}
+
+async Task CompleteProductUpdating(ITelegramBotClient botClient, long chatId)
+{
+    var product = updatingProducts[chatId];
+    appDbContext.Products.Update(product);
+    appDbContext.SaveChanges();
+    updatingProducts.Remove(chatId);
+    updatingStage.Remove(chatId);
+    await botClient.SendTextMessageAsync(chatId, "✅ Mahsulot yangilandi!");
 }
 
 

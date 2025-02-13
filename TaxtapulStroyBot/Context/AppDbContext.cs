@@ -7,6 +7,6 @@ public class AppDbContext : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        optionsBuilder.UseNpgsql("Host=localhost;Port=2025;Username=postgres;Password=postgresql;Database=bot_database;");
+        optionsBuilder.UseSqlite("Data Source=stroyBot.db");
     }
 }
